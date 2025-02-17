@@ -1,0 +1,3 @@
+: - alone should give new line
+! - also should also give new line alone
+echo      \n hola    - it shoud be n hola instead of "\n hola"

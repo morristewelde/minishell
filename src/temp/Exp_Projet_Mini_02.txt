@@ -1,0 +1,685 @@
+SUITE EXP_PROJET_MINISHELL_PARTIE_02
+
+
+📌 Explication complète de handle_signals()
+
+void handle_signals(int signo)
+{
+	//fprintf(stderr, "[DEBUG] handle_signals called with signo=%d\n", signo);
+	if (g_child_pid != 0) // Si un processus fils est actif
+	{
+		kill(g_child_pid, signo); // Transmettre le signal au fils
+		return ;
+	}
+	if (signo == SIGINT) // Ctrl+C
+	{
+		printf("\n"); // Saute une ligne pour éviter d'afficher "^C"
+		rl_on_new_line(); // Redémarre readline() proprement
+		rl_replace_line("", 0); // Efface la ligne en cours
+		rl_redisplay(); // Rafraîchit le prompt sans bug visuel
+	}
+	else if (signo == SIGQUIT) // Ctrl+\ (SIGQUIT)
+	{
+		rl_on_new_line(); // Remet readline à zéro
+		rl_redisplay(); // Réaffiche le prompt
+		printf("  \b\b"); // Cache "^\" en effaçant les deux derniers caractères
+	}
+}
+
+📌 Qui fait quoi ?
+
+🔹 if (g_child_pid != 0) → Si un fils est actif, il doit recevoir le signal, donc on ne traite pas le signal ici, on l’envoie au fils.
+🔹 kill(g_child_pid, signo); → Envoie le signal au processus fils.
+🔹 return; → Sort immédiatement de la fonction, donc le reste du code ne s’exécute que si g_child_pid == 0 (c'est-à-dire si aucun processus fils n'est actif).
+📌 Comment ça marche ?
+
+✔️ SIGINT (Ctrl+C) :
+
+    Saute une ligne (printf("\n")) → pour éviter d'afficher ^C
+    Réinitialise readline() avec :
+        rl_on_new_line(); → Déclare une nouvelle ligne propre
+        rl_replace_line("", 0); → Efface ce qui était écrit avant Ctrl+C
+        rl_redisplay(); → Réaffiche le prompt
+
+✔️ SIGQUIT (Ctrl+\) :
+
+    Empêche le core dump (qui serait le comportement normal de SIGQUIT)
+    Cache l'affichage ^\\ en affichant deux espaces et en les supprimant (printf(" \b\b")).
+
+📌 Explication complète de setup_signals()
+
+void setup_signals(void)
+{
+	signal(SIGINT, handle_signals);
+	signal(SIGQUIT, handle_signals);
+}
+
+📌 Qui fait quoi ?
+
+🔹 signal(SIGINT, handle_signals); → Associe SIGINT (Ctrl+C) à handle_signals().
+🔹 signal(SIGQUIT, handle_signals); → Associe SIGQUIT (Ctrl+\) à handle_signals().
+📌 Comment ça marche ?
+
+✔️ Quand l’utilisateur tape Ctrl+C ou Ctrl+\, le signal est envoyé au shell.
+✔️ Grâce à signal(), handle_signals() est appelée automatiquement.
+✔️ Ça remplace le comportement par défaut (par ex., SIGINT tuerait normalement le programme).
+📌 Explication complète de handle_sigint_heredoc()
+
+void handle_sigint_heredoc(int sig)
+{
+	(void)sig;
+	close(STDIN_FILENO); // Ferme l'entrée standard pour interrompre `readline()`
+}
+
+📌 Qui fait quoi ?
+
+🔹 (void)sig; → On ignore l’argument sig car on n’en a pas besoin.
+🔹 close(STDIN_FILENO); → Ferme l'entrée standard (0), ce qui interrompt readline() immédiatement.
+📌 Comment ça marche ?
+
+✔️ Quand Ctrl+C est tapé dans un heredoc, handle_sigint_heredoc() ferme STDIN, donc readline() renvoie NULL, ce qui interrompt le heredoc sans crasher le shell.
+📌 Explication complète de setup_heredoc_signal()
+
+void setup_heredoc_signal(void)
+{
+	signal(SIGINT, handle_sigint_heredoc);
+}
+
+📌 Qui fait quoi ?
+
+🔹 signal(SIGINT, handle_sigint_heredoc); → Pendant un heredoc, Ctrl+C exécute handle_sigint_heredoc() au lieu de handle_signals().
+📌 Comment ça marche ?
+
+✔️ Avant d’ouvrir un heredoc, on installe ce handler spécial.
+✔️ Ctrl+C interrompt heredoc immédiatement au lieu d'affecter le shell principal.
+🔍 Interaction entre g_child_pid et les signaux
+Cas où g_child_pid != 0
+
+✅ Si un processus enfant est actif (ex: ls lancé dans minishell), alors :
+
+if (g_child_pid != 0)
+{
+	kill(g_child_pid, signo);
+	return;
+}
+
+    Le signal est envoyé au fils (kill(g_child_pid, signo);).
+    Le shell ne réagit pas directement.
+    Le fils meurt si SIGINT ou SIGQUIT est reçu.
+
+Cas où g_child_pid == 0
+
+✅ Si aucun processus n'est actif, alors handle_signals() gère Ctrl+C et Ctrl+\ proprement dans readline().
+📌 Résumé final
+Fonction	Rôle	Que fait-elle ?
+handle_signals()	Gérer SIGINT et SIGQUIT	Réinitialise readline(), empêche ^C, envoie les signaux au fils si actif.
+setup_signals()	Installer handle_signals()	Associe SIGINT et SIGQUIT à handle_signals().
+handle_sigint_heredoc()	Stopper proprement un heredoc	Ferme STDIN pour forcer readline() à s'arrêter.
+setup_heredoc_signal()	Modifier SIGINT pour heredoc	Remplace le handler SIGINT pendant heredoc.
+
+
+
+
+
+🟢 Fonction env_to_array()
+
+char	**env_to_array(t_env_var *env, t_shell *shell)
+{
+	char	**env_array;
+	int		count;
+	int		i;
+
+	count = count_env_vars(env);
+	env_array = safe_malloc(sizeof(char *) * (count + 1), shell);
+	if (!env_array)
+		return (NULL);
+	i = 0;
+	while (env)
+	{
+		env_array[i] = ft_strjoin_three(env->name, "=", env->value, shell);
+		if (!env_array[i])
+		{
+			free_env_array(env_array); // Libérer en cas d'erreur
+			return (NULL);
+		}
+		env = env->next;
+		i++;
+	}
+	env_array[i] = NULL;
+	return (env_array);
+}
+
+📌 Explication détaillée (Comment et Pourquoi)
+🔹 But de la fonction
+
+Cette fonction convertit la liste chaînée t_env_var en un tableau char ** contenant des chaînes sous le format "KEY=VALUE".
+C'est ce format qui est utilisé par execve() quand on exécute une commande avec un environnement.
+🔹 Étape 1 : Calcul du nombre de variables d’environnement
+
+count = count_env_vars(env);
+
+👉 Pourquoi ?
+On doit savoir combien d'éléments contiendra notre tableau pour allouer le bon nombre de cases.
+
+👉 Comment ?
+
+    count_env_vars(env) parcourt toute la liste et compte les variables.
+    Ce nombre (count) sera utilisé pour allouer un tableau de char * avec safe_malloc().
+
+🔹 Étape 2 : Allocation du tableau de char *
+
+env_array = safe_malloc(sizeof(char *) * (count + 1), shell);
+if (!env_array)
+	return (NULL);
+
+👉 Pourquoi count + 1 ?
+Le dernier élément du tableau doit être NULL (NULL-terminated), pour respecter le format des tableaux char ** de execve().
+
+👉 Comment ?
+
+    safe_malloc() alloue un tableau de pointeurs vers des chaînes (char *).
+    Si l’allocation échoue, on retourne immédiatement NULL (évite une fuite mémoire).
+
+🔹 Étape 3 : Remplissage du tableau avec "KEY=VALUE"
+
+i = 0;
+while (env)
+{
+	env_array[i] = ft_strjoin_three(env->name, "=", env->value, shell);
+	if (!env_array[i])
+	{
+		free_env_array(env_array); // Libérer en cas d'erreur
+		return (NULL);
+	}
+	env = env->next;
+	i++;
+}
+
+👉 Pourquoi ft_strjoin_three(env->name, "=", env->value, shell) ?
+
+    On concatène KEY=VALUE sous forme de chaîne unique.
+    Exemple :
+
+    env->name = "PATH"
+    env->value = "/usr/bin"
+
+    Donne : "PATH=/usr/bin"
+
+👉 Gestion d’erreur
+
+    Si ft_strjoin_three() échoue, il faut libérer tout ce qui a été alloué avant (free_env_array(env_array)) pour éviter une fuite mémoire.
+
+🔹 Étape 4 : Ajout du NULL final et retour
+
+env_array[i] = NULL;
+return (env_array);
+
+👉 Pourquoi ?
+
+    execve() et d’autres fonctions attendent un tableau NULL-terminated.
+    On place NULL en dernière position pour marquer la fin.
+
+🛑 Vérification des fuites mémoire
+✅ Ce qui est bien géré :
+
+    Si safe_malloc() échoue, on retourne immédiatement NULL (pas de fuite).
+    Si ft_strjoin_three() échoue, on libère tout avec free_env_array().
+
+🚨 Ce qui était un risque de fuite (corrigé) :
+
+    Si une allocation échoue en cours de route, on doit libérer tout ce qui a été alloué avant.
+    Ça évite d’avoir des blocs alloués non libérés.
+
+🔄 Correction améliorée avec une gestion des erreurs plus propre
+
+char	**env_to_array(t_env_var *env, t_shell *shell)
+{
+	char	**env_array;
+	int		count;
+	int		i;
+
+	count = count_env_vars(env);
+	env_array = safe_malloc(sizeof(char *) * (count + 1), shell);
+	if (!env_array)
+		return (NULL);
+
+	i = 0;
+	while (env)
+	{
+		env_array[i] = ft_strjoin_three(env->name, "=", env->value, shell);
+		if (!env_array[i])
+		{
+			while (i > 0)  // ✅ On libère toutes les cases déjà allouées
+			{
+				free(env_array[--i]);
+			}
+			free(env_array);
+			return (NULL);
+		}
+		env = env->next;
+		i++;
+	}
+	env_array[i] = NULL;
+	return (env_array);
+}
+
+👉 Pourquoi cette correction ?
+
+    On évite free_env_array() trop tôt (si elle est utilisée ailleurs, elle peut être problématique).
+    On libère toutes les allocations une par une si ft_strjoin_three() échoue.
+    C'est plus propre et évite une fuite mémoire en cas d'erreur.
+
+📌 Conclusion
+
+✅ Fonction bien optimisée, aucune fuite mémoire possible.
+✅ Explication complète du fonctionnement ligne par ligne.
+✅ On peut passer à env_new_var() si c'est bon pour toi. 🚀
+
+
+
+📌 Explication ultra détaillée de tokenize_input()
+🔍 Objectif global de tokenize_input()
+
+Le rôle de cette fonction est de découper (tokenize) une ligne de commande entrée par l’utilisateur pour la transformer en une liste chaînée de tokens.
+Ces tokens représentent les éléments essentiels d’une commande shell :
+
+✅ Exemple de ligne de commande :
+
+echo "Hello $USER" > out.txt | cat out.txt
+
+✅ Résultat attendu après tokenization :
+
+[TOKEN_WORD: echo]
+[TOKEN_WORD: Hello root]  (expansion de $USER)
+[TOKEN_REDIRECT_OUT: >]
+[TOKEN_WORD: out.txt]
+[TOKEN_PIPE: |]
+[TOKEN_WORD: cat]
+[TOKEN_WORD: out.txt]
+
+🚀 Pourquoi cette étape est importante ? Un shell doit comprendre ce que tape l'utilisateur avant d'exécuter quoi que ce soit. La tokenization permet de séparer les différentes parties de la commande (mots, redirections, pipes...) pour que l'exécuteur puisse ensuite traiter chaque élément correctement.
+📌 Déclaration et initialisation des variables
+
+t_token	*tokenize_input(const char *input, t_shell *shell)
+{
+	t_token			*tokens;
+	int				i;
+	int				start;
+	t_token_type	type;
+	char			*processed_value;
+	char			*raw_value;
+
+	tokens = NULL;
+	i = 0;
+
+🚀 Que fait ce bloc ?
+
+    tokens → Initialise la liste chaînée des tokens à NULL. Elle contiendra tous les tokens trouvés dans input.
+    i → C'est un curseur qui parcourt input caractère par caractère.
+    start → Utilisé pour retenir la position de départ d'un mot (utile pour extraire un mot entier plus tard).
+    type → Contient le type du token en cours (ex : TOKEN_WORD, TOKEN_PIPE, TOKEN_REDIRECT_OUT, etc.).
+    raw_value → Stocke la version brute d'un token avant traitement.
+    processed_value → Stocke la version modifiée du token après expansion ($VAR → valeur).
+
+✅ Exemple d’utilisation de start :
+
+Commande tapée :  echo "Hello world"
+Début du mot Hello → start = i = 5
+Fin du mot Hello → i = 10
+
+📌 Étape 1 : Vérification des Quotes
+
+	if (!check_quotes(input))
+		return (NULL);
+
+🚀 Pourquoi cette vérification ? Avant de découper input, on vérifie si toutes les quotes sont bien fermées.
+Si une quote est ouverte sans être fermée, la commande est invalide, et le shell doit arrêter immédiatement.
+
+✅ Exemple où l'erreur se produit :
+
+echo "Hello
+
+Explication :
+
+    On ouvre un guillemet ", mais on ne le ferme jamais.
+    check_quotes(input) retourne false, et donc tokenize_input() retourne NULL.
+
+✅ Exemple valide :
+
+echo "Hello"
+
+    Toutes les quotes sont bien fermées → on peut continuer.
+
+📌 Étape 2 : Boucle principale pour analyser input
+
+	while (input[i])
+	{
+		i = get_next_index(input, i);
+		if (!input[i])
+			break;
+
+🚀 Pourquoi cette boucle ?
+
+    Elle parcourt input caractère par caractère jusqu'à la fin (\0).
+    get_next_index(input, i) permet de sauter les espaces pour aller directement au prochain caractère utile.
+
+✅ Exemple :
+
+Input : "   ls -l | grep txt"
+→ `get_next_index()` saute les 3 espaces et place `i` directement sur `l`.
+
+📌 Étape 3 : Gestion des opérateurs non supportés (&& et ||)
+
+		if ((input[i] == '&' && input[i + 1] == '&') ||
+			(input[i] == '|' && input[i + 1] == '|'))
+		{
+			raw_value = ft_substr(input, i, 2);
+			if (!raw_value)
+				return (free_token_and_value(NULL, &tokens));
+			token_add(&tokens, token_new(raw_value, TOKEN_UNSUPPORTED, NO_QUOTE));
+			i += 2;
+			continue;
+		}
+
+🚀 Pourquoi ?
+
+    Minishell ne supporte pas && et ||, mais doit les détecter.
+    On les stocke comme TOKEN_UNSUPPORTED pour que l'exécuteur puisse afficher une erreur plus tard.
+
+✅ Exemple :
+
+Input : ls && echo test
+→ Token list :
+[TOKEN_WORD: ls]
+[TOKEN_UNSUPPORTED: &&]
+[TOKEN_WORD: echo]
+[TOKEN_WORD: test]
+
+📌 Étape 4 : Gestion des Pipes |
+
+		if (input[i] == '|')
+		{
+			raw_value = ft_substr(input, i, 1);
+			if (!raw_value)
+				return (free_token_and_value(NULL, &tokens));
+			token_add(&tokens, token_new(raw_value, TOKEN_PIPE, NO_QUOTE));
+			i++;
+			continue;
+		}
+
+🚀 Pourquoi ?
+
+    | est un séparateur de commandes (ls | grep txt).
+    On extrait | avec ft_substr(input, i, 1) et on crée un TOKEN_PIPE.
+
+✅ Exemple :
+
+Input : "ls | grep txt"
+→ Token list :
+[TOKEN_WORD: ls]
+[TOKEN_PIPE: |]
+[TOKEN_WORD: grep]
+[TOKEN_WORD: txt]
+
+📌 Étape 5 : Gestion des redirections <, >, <<, >>
+
+		if (input[i] == '<' || input[i] == '>')
+		{
+			if (input[i + 1] == input[i])
+			{
+				if (input[i] == '<')
+					type = TOKEN_HEREDOC;
+				else
+					type = TOKEN_REDIRECT_APPEND;
+
+🚀 Pourquoi ?
+
+    > et < indiquent une redirection simple (ls > file.txt).
+    >> est une redirection en mode append (echo "hello" >> file.txt).
+    << est un heredoc (cat << EOF).
+
+✅ Exemple :
+
+Input : echo hello > file.txt
+→ Token list :
+[TOKEN_WORD: echo]
+[TOKEN_WORD: hello]
+[TOKEN_REDIRECT_OUT: >]
+[TOKEN_WORD: file.txt]
+
+Je vais continuer avec la suite des explications détaillées pour :
+
+    Le traitement des heredocs (<<EOF)
+    L'extraction des arguments classiques
+    L'expansion des variables ($HOME)
+    L'ajout des tokens dans la liste
+    L'explication complète des sous-fonctions (token_add, ft_substr, etc.)
+
+
+
+On reprend après la gestion des redirections (>, <, >>, <<), et on continue avec l'extraction du délimiteur heredoc, les arguments classiques, l'expansion des variables, l'ajout des tokens dans la liste chaînée, et les fonctions imbriquées.
+📌 Étape 6 : Extraction du délimiteur pour << (heredoc)
+
+			if (type == TOKEN_HEREDOC)
+			{
+				i = get_next_index(input, i);
+				start = i;
+				if (input[i] == '\'' || input[i] == '"')
+					i = get_end_of_quotes(input, i);
+				else
+					i = get_end_of_argument(input, i);
+				if (i == -1)
+					return (free_token_and_value(NULL, &tokens));
+				raw_value = ft_substr(input, start, i - start);
+				if (!raw_value)
+					return (free_token_and_value(NULL, &tokens));
+				token_add(&tokens, token_new(raw_value, TOKEN_WORD, NO_QUOTE));
+			}
+
+🚀 Pourquoi ?
+
+    Quand on détecte <<, on doit récupérer son délimiteur, c'est-à-dire le mot qui suit.
+    Ce délimiteur est utilisé plus tard pour le traitement du heredoc.
+
+✅ Exemple :
+
+Input : cat << END
+
+    << est détecté, donc on cherche le mot suivant (END).
+    get_next_index(input, i) ignore les espaces pour aller directement sur E.
+    get_end_of_argument(input, i) trouve la fin du mot (END).
+    ft_substr(input, start, i - start) extrait "END".
+    On stocke "END" dans TOKEN_WORD.
+
+🔹 Résultat des tokens :
+
+[TOKEN_HEREDOC: <<]
+[TOKEN_WORD: END]
+
+📌 Pourquoi get_end_of_quotes() et get_end_of_argument() ?
+
+    Si le délimiteur est entre quotes, on doit garder les quotes ("<<EOF" doit être traité différemment de << EOF).
+    Si ce n'est pas entre quotes, get_end_of_argument() lit jusqu’au premier espace.
+
+📌 Étape 7 : Gestion des arguments classiques (mots, commandes, fichiers, etc.)
+
+		start = i;
+		if (input[i] == '\'' || input[i] == '"')
+			i = get_end_of_quotes(input, i);
+		else
+			i = get_end_of_argument(input, i);
+		if (i == -1)
+			return (free_token_and_value(NULL, &tokens));
+
+🚀 Pourquoi ?
+
+    Un mot classique est soit une commande (ls), soit un argument (-l), soit un fichier (file.txt).
+    Si l’argument est entre quotes, on le lit jusqu'à la fin des quotes.
+    Sinon, on lit jusqu'au prochain espace.
+
+✅ Exemple :
+
+Input : echo "Hello World"
+
+    echo → Simple mot, détecté comme TOKEN_WORD.
+    "Hello World" → Entre guillemets, donc get_end_of_quotes() le lit en entier.
+
+🔹 Résultat des tokens :
+
+[TOKEN_WORD: echo]
+[TOKEN_WORD: Hello World]
+
+📌 Pourquoi get_end_of_quotes() et get_end_of_argument() ?
+
+    get_end_of_quotes() → Gère les arguments entre quotes ("hello world" doit être un seul token).
+    get_end_of_argument() → Lit jusqu'au prochain espace.
+
+📌 Étape 8 : Expansion des variables d’environnement ($USER, $HOME, etc.)
+
+		raw_value = ft_substr(input, start, i - start);
+		if (!raw_value)
+			return (free_token_and_value(NULL, &tokens));
+
+		processed_value = process_quotes_and_expansion(raw_value, shell);
+		if (!processed_value)
+			return (free_token_and_value(raw_value, &tokens));
+
+		free(raw_value);
+		token_add(&tokens, token_new(processed_value, TOKEN_WORD, NO_QUOTE));
+
+🚀 Pourquoi ?
+
+    Après avoir extrait un mot ou une commande, il faut vérifier s’il contient des variables ($USER).
+    Si une variable est détectée, elle doit être expansée (remplacée par sa valeur).
+
+✅ Exemple 1 : Expansion d’une variable
+
+Input : echo $HOME
+
+    Sans expansion : $HOME est un mot normal.
+    Avec expansion (process_quotes_and_expansion()) :
+
+    [TOKEN_WORD: echo]
+    [TOKEN_WORD: /home/user]  (expansion de $HOME)
+
+✅ Exemple 2 : Variable dans une string
+
+Input : echo "Bonjour $USER"
+
+    "Bonjour $USER" contient une variable.
+    process_quotes_and_expansion() remplace $USER par "root" :
+
+    [TOKEN_WORD: echo]
+    [TOKEN_WORD: Bonjour root]
+
+📌 Pourquoi process_quotes_and_expansion() ?
+
+    Cette fonction remplace $VAR par sa valeur actuelle dans l’environnement.
+    Elle ignore l'expansion si $VAR est dans des quotes simples ' ('echo $USER' doit rester littéral).
+
+📌 Étape 9 : Ajout du token dans la liste
+
+		token_add(&tokens, token_new(processed_value, TOKEN_WORD, NO_QUOTE));
+
+🚀 Pourquoi ?
+
+    token_new(processed_value, TOKEN_WORD, NO_QUOTE) → Crée un nouveau token contenant le mot traité.
+    token_add(&tokens, new_token) → Ajoute ce token dans la liste chaînée tokens.
+
+✅ Exemple :
+
+Input : echo Bonjour
+
+    "echo" est extrait comme TOKEN_WORD.
+    "Bonjour" est extrait comme TOKEN_WORD.
+    On ajoute chaque token à tokens.
+
+🔹 Résultat final :
+
+[TOKEN_WORD: echo]
+[TOKEN_WORD: Bonjour]
+
+📌 Fonctionnalités imbriquées expliquées
+🔹 ft_substr()
+
+Extrait une sous-chaîne de input entre deux index.
+
+raw_value = ft_substr(input, start, i - start);
+
+✅ Exemple :
+
+input = "echo hello"
+start = 5
+i = 10
+ft_substr(input, start, i - start) → "hello"
+
+🔹 token_new()
+
+Crée un nouveau token avec un mot et un type.
+
+t_token *token_new(char *value, t_token_type type, t_quote_type quote)
+{
+	t_token *new_token;
+
+	new_token = malloc(sizeof(t_token));
+	new_token->value = ft_strdup(value);
+	new_token->type = type;
+	new_token->quote = quote;
+	new_token->next = NULL;
+	return (new_token);
+}
+
+🔹 token_add()
+
+Ajoute un nouveau token à la liste chaînée tokens.
+
+void	token_add(t_token **list, t_token *new_token)
+{
+	t_token	*current;
+
+	if (!*list)
+	{
+		*list = new_token;
+		return;
+	}
+	current = *list;
+	while (current->next)
+		current = current->next;
+	current->next = new_token;
+}
+
+🔹 free_token_and_value()
+
+Libère la mémoire si une erreur se produit.
+
+static void	free_token_and_value(char *value, t_token **tokens)
+{
+	if (value)
+		free(value);
+	if (tokens)
+		token_free(tokens);
+}
+
+📌 Résumé final de tokenize_input()
+🔹 Étapes principales
+
+    Vérifie si toutes les quotes sont fermées.
+    Parcourt input, ignore les espaces.
+    Détecte les opérateurs non supportés (&&, ||).
+    Détecte les pipes |.
+    Détecte les redirections <, >, <<, >>.
+    Si heredoc, extrait son délimiteur.
+    Extrait les arguments (commandes, fichiers, options...).
+    Si un argument contient une variable, l’expanse ($USER → root).
+    Crée un token et l’ajoute à la liste chaînée.
+    Retourne la liste finale de tokens.
+
+🔥 Maintenant, Minishell sait exactement ce que l’utilisateur a tapé et peut l’exécuter !
+
+
+
+
+
+
+
+

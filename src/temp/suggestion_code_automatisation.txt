@@ -1,0 +1,1201 @@
+Oui, tu peux automatiser les erreurs et réduire le nombre de lignes en créant des fonctions utilitaires spécifiques pour :
+
+    Gérer les erreurs de manière uniforme (print_error).
+    Allouer de la mémoire avec vérification automatique (safe_malloc, safe_strdup, etc.).
+    Factoriser les logs et la gestion des erreurs.
+
+Voici comment tu peux optimiser ton code :
+1. Fonction de gestion d'erreur centralisée
+
+Au lieu d'écrire ft_putstr_fd("minishell: erreur...\n", STDERR_FILENO); à chaque fois, crée une fonction print_error :
+
+void	print_error(const char *cmd, const char *msg)
+{
+	ft_putstr_fd("minishell: ", STDERR_FILENO);
+	if (cmd)
+	{
+		ft_putstr_fd(cmd, STDERR_FILENO);
+		ft_putstr_fd(": ", STDERR_FILENO);
+	}
+	ft_putstr_fd(msg, STDERR_FILENO);
+	ft_putstr_fd("\n", STDERR_FILENO);
+}
+
+Utilisation dans builtin_cd :
+
+if (!getcwd(cwd, sizeof(cwd)))
+{
+	print_error("cd", "getcwd error");
+	return (1);
+}
+
+2. safe_malloc et safe_strdup pour éviter de retaper les vérifications
+
+Chaque malloc doit être vérifié. Pour ne pas le refaire à chaque fois, encapsule-le :
+
+void	*safe_malloc(size_t size)
+{
+	void	*ptr;
+
+	ptr = malloc(size);
+	if (!ptr)
+	{
+		print_error("malloc", "memory allocation failed");
+		exit(EXIT_FAILURE);
+	}
+	return (ptr);
+}
+
+char	*safe_strdup(const char *s)
+{
+	char	*copy;
+
+	copy = ft_strdup(s);
+	if (!copy)
+	{
+		print_error("strdup", "memory allocation failed");
+		exit(EXIT_FAILURE);
+	}
+	return (copy);
+}
+
+Utilisation dans builtin_export :
+
+name = safe_strdup(args[1]);
+value = safe_strdup(equal_pos + 1);
+
+3. Fonction générique pour set_env_var
+
+Actuellement, tu répètes :
+
+set_env_var(&shell->env, "OLDPWD", old_pwd);
+set_env_var(&shell->env, "PWD", cwd);
+
+Tu peux créer une fonction plus compacte :
+
+void	update_env_vars(t_env_var **env, char *name, char *value)
+{
+	if (!name || !value)
+		return ;
+	set_env_var(env, name, value);
+}
+
+Utilisation :
+
+update_env_vars(&shell->env, "OLDPWD", old_pwd);
+update_env_vars(&shell->env, "PWD", cwd);
+
+4. Gestion simplifiée des fichiers (safe_open)
+
+Pour éviter de répéter l'ouverture de fichiers avec if (fd < 0), crée une fonction :
+
+int	safe_open(const char *filename, int flags, mode_t mode)
+{
+	int	fd;
+
+	fd = open(filename, flags, mode);
+	if (fd < 0)
+		print_error(filename, strerror(errno));
+	return (fd);
+}
+
+Utilisation dans les redirections :
+
+cmd->input_fd = safe_open(cmd->input_file, O_RDONLY, 0);
+if (cmd->input_fd < 0)
+	return (-1);
+
+5. Optimisation de is_n_option
+
+Au lieu d’un while répétitif, utilise ft_strncmp :
+
+int	is_n_option(char *arg)
+{
+	if (!arg || arg[0] != '-')
+		return (0);
+	for (int i = 1; arg[i]; i++)
+		if (arg[i] != 'n')
+			return (0);
+	return (1);
+}
+
+6. Réduction des vérifications répétées
+
+Dans builtin_echo, tu peux simplifier l’option -n avec is_n_option :
+
+void	builtin_echo(char **args, t_shell *shell)
+{
+	int	i = 1;
+	int	newline = 1;
+
+	// Vérifie si -n est activé
+	while (args[i] && is_n_option(args[i]))
+	{
+		newline = 0;
+		i++;
+	}
+
+	// Affichage des arguments
+	while (args[i])
+	{
+		ft_putstr_fd(args[i], STDOUT_FILENO);
+		if (args[i + 1]) 
+			ft_putstr_fd(" ", STDOUT_FILENO);
+		i++;
+	}
+
+	if (newline)
+		ft_putstr_fd("\n", STDOUT_FILENO);
+
+	shell->last_exit_status = 0;
+}
+
+7. Encapsulation des fork et execve
+
+Dans execute_commands, le fork et execve peuvent être simplifiés :
+
+void	execute_child_process(t_command *cmd, t_shell *shell)
+{
+	char	*path = resolve_command_path(cmd->argv[0], shell->env);
+
+	if (!path)
+	{
+		print_error(cmd->argv[0], "command not found");
+		exit(127);
+	}
+
+	execve(path, cmd->argv, env_to_array(shell->env));
+	print_error("execve", "execution failed");
+	exit(127);
+}
+
+Dans la boucle fork :
+
+if (fork() == 0)
+	execute_child_process(cmd, shell);
+
+Conclusion
+
+Avec ces changements : ✅ Moins de répétition
+✅ Gestion des erreurs automatisée
+✅ Allocation mémoire sécurisée
+✅ Code plus lisible et plus conforme aux normes
+
+Si tu veux encore plus optimiser, dis-moi où tu galères encore !
+
+1. Gestion des erreurs centralisée
+Fonctions existantes impactées :
+
+    builtin_cd
+
+    builtin_export
+
+    builtin_unset
+
+    builtin_exit
+
+    execute_commands
+
+    handle_redirections
+
+    resolve_command_path
+
+    tokenize_input
+
+    organize_commands
+
+Nouvelle fonction à implémenter :
+c
+Copy
+
+void print_error(const char *cmd, const char *msg);
+
+Exemple d'utilisation :
+
+Dans builtin_cd :
+c
+Copy
+
+if (!getcwd(cwd, sizeof(cwd)))
+{
+    print_error("cd", "getcwd error");
+    return (1);
+}
+
+2. Allocation mémoire sécurisée
+Fonctions existantes impactées :
+
+    token_new
+
+    env_new_var
+
+    ft_strjoin_three
+
+    ft_strjoin_multiple
+
+    replace_env_variables
+
+    process_quotes_and_expansion
+
+    resolve_command_path
+
+    builtin_export
+
+    builtin_unset
+
+Nouvelles fonctions à implémenter :
+c
+Copy
+
+void *safe_malloc(size_t size);
+char *safe_strdup(const char *s);
+
+Exemple d'utilisation :
+
+Dans builtin_export :
+c
+Copy
+
+name = safe_strdup(args[1]);
+value = safe_strdup(equal_pos + 1);
+
+3. Gestion simplifiée des variables d'environnement
+Fonctions existantes impactées :
+
+    builtin_cd
+
+    builtin_export
+
+    builtin_unset
+
+    update_env_vars
+
+Nouvelle fonction à implémenter :
+c
+Copy
+
+void update_env_vars(t_env_var **env, char *name, char *value);
+
+Exemple d'utilisation :
+
+Dans builtin_cd :
+c
+Copy
+
+update_env_vars(&shell->env, "OLDPWD", old_pwd);
+update_env_vars(&shell->env, "PWD", cwd);
+
+4. Gestion simplifiée des fichiers (safe_open)
+Fonctions existantes impactées :
+
+    handle_redirections
+
+    execute_commands
+
+Nouvelle fonction à implémenter :
+c
+Copy
+
+int safe_open(const char *filename, int flags, mode_t mode);
+
+Exemple d'utilisation :
+
+Dans handle_redirections :
+c
+Copy
+
+cmd->input_fd = safe_open(cmd->input_file, O_RDONLY, 0);
+if (cmd->input_fd < 0)
+    return (-1);
+
+5. Optimisation de is_n_option
+Fonctions existantes impactées :
+
+    builtin_echo
+
+Nouvelle fonction à implémenter :
+c
+Copy
+
+int is_n_option(const char *arg);
+
+Exemple d'utilisation :
+
+Dans builtin_echo :
+c
+Copy
+
+if (is_n_option(args[i]))
+{
+    newline = 0;
+    i++;
+}
+
+6. Encapsulation des fork et execve
+Fonctions existantes impactées :
+
+    execute_commands
+
+Nouvelle fonction à implémenter :
+c
+Copy
+
+void execute_child_process(t_command *cmd, t_shell *shell);
+
+Exemple d'utilisation :
+
+Dans execute_commands :
+c
+Copy
+
+if (fork() == 0)
+    execute_child_process(cmd, shell);
+
+7. Autres optimisations possibles
+Fonctions existantes impactées :
+
+    tokenize_input
+
+    organize_commands
+
+    validate_token_sequence
+
+    validate_commands
+
+Nouvelles fonctions à implémenter :
+
+    is_special_char : Déjà implémentée, mais pourrait être utilisée plus largement.
+
+    is_valid_identifier : Déjà implémentée, mais pourrait être utilisée plus largement.
+
+Résumé des nouvelles fonctions à implémenter
+
+    Gestion des erreurs :
+
+        print_error
+
+    Allocation mémoire sécurisée :
+
+        safe_malloc
+
+        safe_strdup
+
+    Gestion des variables d'environnement :
+
+        update_env_vars
+
+    Gestion des fichiers :
+
+        safe_open
+
+    Optimisation de is_n_option :
+
+        is_n_option
+
+    Encapsulation des fork et execve :
+
+        execute_child_process
+
+Impact sur ton projet
+
+Ces améliorations permettront de :
+
+    Réduire la redondance : Moins de répétition de code pour la gestion des erreurs et l'allocation mémoire.
+
+    Améliorer la lisibilité : Le code sera plus concis et plus facile à comprendre.
+
+    Faciliter la maintenance : Les modifications futures seront plus simples à implémenter.
+
+Si tu veux que je t'aide à implémenter l'une de ces fonctions ou à les intégrer dans ton projet, n'hésite pas à me le dire ! 😊
+
+
+
+Dans builtin_cd, tu dois t'assurer que shell->last_exit_status est correctement mis à jour en fonction du succès ou de l'échec de la commande. Actuellement, tu retournes 0 en cas de succès et 1 en cas d'erreur, mais tu ne mets pas à jour shell->last_exit_status. Voici comment tu peux le faire :
+c
+Copy
+
+int	builtin_cd(t_command *cmd, t_shell *shell)
+{
+	char	*path;
+	char	cwd[1024];
+	char	*old_pwd;
+	int		from_cd_dash = 0; // Flag pour indiquer si "cd -" ou "cd ." est utilisé
+
+	// Obtenir le chemin actuel (PWD)
+	if (!getcwd(cwd, sizeof(cwd)))
+	{
+		perror("minishell: cd: getcwd");
+		shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+		return (1);
+	}
+
+	// Si aucun argument, utiliser HOME
+	if (!cmd->argv[1])
+	{
+		path = get_env_value(shell->env, "HOME");
+		if (!path || !*path)
+		{
+			ft_putstr_fd("minishell: cd: HOME not set\n", STDERR_FILENO);
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+			return (1);
+		}
+		path = ft_strdup(path);
+	}
+	// Si "cd -" utilisé, alterner entre OLDPWD et PWD
+	else if (ft_strcmp(cmd->argv[1], "-") == 0)
+	{
+		path = get_env_value(shell->env, "OLDPWD");
+		if (!path || !*path)
+		{
+			ft_putstr_fd("minishell: cd: OLDPWD not set\n", STDERR_FILENO);
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+			return (1);
+		}
+		path = ft_strdup(path);
+		from_cd_dash = 1;
+
+		// Affiche OLDPWD immédiatement (spécifique à cd -)
+		ft_putstr_fd(path, STDOUT_FILENO);
+		ft_putstr_fd("\n", STDOUT_FILENO);
+	}
+	// Si "cd ." utilisé, marquer comme déjà affiché
+	else if (ft_strcmp(cmd->argv[1], ".") == 0)
+	{
+		from_cd_dash = 1; // Indique qu'on ne doit rien afficher
+		path = ft_strdup(cwd); // Le chemin reste le même
+	}
+	// Sinon, utiliser le chemin donné
+	else
+		path = ft_strdup(cmd->argv[1]);
+
+	// Vérifie si le chemin existe
+	if (access(path, F_OK) != 0)
+	{
+		ft_putstr_fd("minishell: cd: ", STDERR_FILENO);
+		ft_putstr_fd(path, STDERR_FILENO);
+		ft_putstr_fd(": No such file or directory\n", STDERR_FILENO);
+		free(path);
+		shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+		return (1);
+	}
+
+	// Changer de répertoire
+	if (chdir(path) == -1)
+	{
+		perror("minishell: cd");
+		free(path);
+		shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+		return (1);
+	}
+
+	// Mettre à jour OLDPWD et PWD
+	old_pwd = get_env_value(shell->env, "PWD");
+	if (old_pwd)
+		set_env_var(&shell->env, "OLDPWD", old_pwd);
+	if (getcwd(cwd, sizeof(cwd)))
+		set_env_var(&shell->env, "PWD", cwd);
+	else
+		perror("minishell: cd: getcwd");
+
+	// Affiche le chemin si ce n’est pas déjà fait via "cd -" ou "cd ."
+	if (!from_cd_dash)
+	{
+		ft_putstr_fd(cwd, STDOUT_FILENO);
+		ft_putstr_fd("\n", STDOUT_FILENO);
+	}
+
+	free(path);
+	shell->last_exit_status = 0; // Mettre à jour le statut de sortie en cas de succès
+	return (0);
+}
+
+2. Gestion de last_exit_status dans builtin_echo
+
+Dans builtin_echo, tu mets déjà shell->last_exit_status = 0 à la fin de la fonction, ce qui est correct. Cependant, tu devrais également gérer les erreurs potentielles (par exemple, si ft_putstr_fd échoue). Voici une version améliorée :
+c
+Copy
+
+void	builtin_echo(char **args, t_shell *shell)
+{
+	int	i;
+	int	newline;
+
+	printf("[DEBUG] builtin_echo() called with args:\n");
+	for (i = 0; args[i]; i++)
+		printf("[DEBUG] Arg[%d] = %s\n", i, args[i]);
+
+	i = 1;
+	newline = 1;
+
+	// Vérifie si -n est activé
+	while (args[i] && is_valid_n_option(args[i]))
+	{
+		newline = 0;
+		i++;
+	}
+
+	// Affichage des arguments avec gestion correcte des espaces
+	while (args[i])
+	{
+		if (ft_putstr_fd(args[i], STDOUT_FILENO) < 0)
+		{
+			perror("minishell: echo");
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie en cas d'erreur
+			return;
+		}
+		if (args[i + 1] && ft_putstr_fd(" ", STDOUT_FILENO) < 0)
+		{
+			perror("minishell: echo");
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie en cas d'erreur
+			return;
+		}
+		i++;
+	}
+
+	// Empêcher le prompt de coller après `echo -n`
+	if (!newline)
+	{
+		if (ft_putstr_fd(" \033[0K", STDOUT_FILENO) < 0)
+		{
+			perror("minishell: echo");
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie en cas d'erreur
+			return;
+		}
+	}
+
+	if (newline && ft_putstr_fd("\n", STDOUT_FILENO) < 0)
+	{
+		perror("minishell: echo");
+		shell->last_exit_status = 1; // Mettre à jour le statut de sortie en cas d'erreur
+		return;
+	}
+
+	shell->last_exit_status = 0; // Mettre à jour le statut de sortie en cas de succès
+
+	printf("[DEBUG] builtin_echo() finished execution\n");
+}
+
+3. Gestion de last_exit_status dans execute_builtin
+
+Dans execute_builtin, tu dois t'assurer que shell->last_exit_status est correctement mis à jour après chaque commande. Voici une version améliorée :
+c
+Copy
+
+int	execute_builtin(t_command *cmd, t_shell *shell)
+{
+	int	ret;
+
+	// Gérer les redirections avant d'exécuter un builtin
+	if (handle_redirections(cmd) < 0)
+	{
+		shell->last_exit_status = 1;
+		return (1);
+	}
+
+	// Exécuter le builtin approprié
+	if (ft_strcmp(cmd->argv[0], "pwd") == 0)
+		ret = builtin_pwd();
+	else if (ft_strcmp(cmd->argv[0], "export") == 0)
+		ret = builtin_export(cmd->argv, &shell->env);
+	else if (ft_strcmp(cmd->argv[0], "unset") == 0)
+		ret = builtin_unset(cmd->argv, &shell->env);
+	else if (ft_strcmp(cmd->argv[0], "cd") == 0)
+		ret = builtin_cd(cmd, shell);
+	else if (ft_strcmp(cmd->argv[0], "env") == 0)
+		ret = builtin_env(shell->env);
+	else if (ft_strcmp(cmd->argv[0], "exit") == 0)
+		ret = builtin_exit(cmd->argv, shell);
+	else if (ft_strcmp(cmd->argv[0], "echo") == 0)
+	{
+		builtin_echo(cmd->argv, shell);
+		ret = 0;
+	}
+	else
+		ret = 1; // Si aucune commande builtin ne correspond
+
+	// Mettre à jour le statut de sortie
+	shell->last_exit_status = ret;
+	return (ret);
+}
+
+4. Validation des commandes
+
+Dans validate_commands, tu vérifies déjà les erreurs de syntaxe et les fichiers manquants. Assure-toi que shell->last_exit_status est mis à jour en cas d'erreur :
+c
+Copy
+
+int	validate_commands(t_command *commands, t_shell *shell)
+{
+	t_command	*cmd = commands;
+
+	while (cmd)
+	{
+		if (!cmd->argv || !cmd->argv[0])
+		{
+			ft_putstr_fd("minishell: syntax error: unexpected empty command\n", STDERR_FILENO);
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+			return (-1);
+		}
+		if (cmd->pipe_out && (!cmd->next || !cmd->next->argv || !cmd->next->argv[0]))
+		{
+			ft_putstr_fd("minishell: syntax error near unexpected token '|'\n", STDERR_FILENO);
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+			return (-1);
+		}
+		if (cmd->input_file && access(cmd->input_file, F_OK) != 0)
+		{
+			ft_putstr_fd("minishell: ", STDERR_FILENO);
+			ft_putstr_fd(cmd->input_file, STDERR_FILENO);
+			ft_putstr_fd(": No such file or directory\n", STDERR_FILENO);
+			shell->last_exit_status = 1; // Mettre à jour le statut de sortie
+			return (-1);
+		}
+		cmd = cmd->next;
+	}
+	return (0);
+}
+
+5. Conclusion
+
+Avec ces modifications, ton code devrait correctement gérer last_exit_status pour toutes les commandes, y compris cd et echo. N'oublie pas de tester chaque cas pour t'assurer que tout fonctionne comme prévu. Si tu as encore des problèmes, n'hésite pas à me montrer les logs de débogage ou à poser des questions ! 😊
+New chat
+
+
+
+
+
+void *safe_malloc(size_t size)
+{
+    void *ptr;
+
+    ptr = malloc(size);
+    if (!ptr)
+    {
+        print_error("malloc", "memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    return (ptr);
+}
+
+Utilisation :
+c
+Copy
+
+char *str = safe_malloc(100);
+
+2. safe_strdup
+
+Duplique une chaîne de caractères et gère les erreurs.
+c
+Copy
+
+char *safe_strdup(const char *s)
+{
+    char *copy;
+
+    copy = ft_strdup(s);
+    if (!copy)
+    {
+        print_error("strdup", "memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    return (copy);
+}
+
+Utilisation :
+c
+Copy
+
+char *copy = safe_strdup("Hello, world!");
+
+3. safe_strjoin
+
+Concatène deux chaînes de caractères et gère les erreurs.
+c
+Copy
+
+char *safe_strjoin(const char *s1, const char *s2)
+{
+    char *result;
+
+    result = ft_strjoin(s1, s2);
+    if (!result)
+    {
+        print_error("strjoin", "memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    return (result);
+}
+
+Utilisation :
+c
+Copy
+
+char *result = safe_strjoin("Hello, ", "world!");
+
+4. safe_open
+
+Ouvre un fichier et gère les erreurs.
+c
+Copy
+
+int safe_open(const char *filename, int flags, mode_t mode)
+{
+    int fd;
+
+    fd = open(filename, flags, mode);
+    if (fd < 0)
+    {
+        print_error(filename, strerror(errno));
+        return (-1);
+    }
+    return (fd);
+}
+
+Utilisation :
+c
+Copy
+
+int fd = safe_open("file.txt", O_RDONLY, 0);
+if (fd < 0)
+    return (1); // Gestion de l'erreur
+
+5. safe_pipe
+
+Crée un pipe et gère les erreurs.
+c
+Copy
+
+void safe_pipe(int pipefd[2])
+{
+    if (pipe(pipefd) < 0)
+    {
+        print_error("pipe", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+Utilisation :
+c
+Copy
+
+int pipefd[2];
+safe_pipe(pipefd);
+
+6. safe_fork
+
+Crée un processus fils et gère les erreurs.
+c
+Copy
+
+pid_t safe_fork(void)
+{
+    pid_t pid;
+
+    pid = fork();
+    if (pid < 0)
+    {
+        print_error("fork", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    return (pid);
+}
+
+Utilisation :
+c
+Copy
+
+pid_t pid = safe_fork();
+if (pid == 0)
+{
+    // Code du fils
+}
+
+7. safe_dup2
+
+Duplique un descripteur de fichier et gère les erreurs.
+c
+Copy
+
+void safe_dup2(int oldfd, int newfd)
+{
+    if (dup2(oldfd, newfd) < 0)
+    {
+        print_error("dup2", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+Utilisation :
+c
+Copy
+
+safe_dup2(pipefd[0], STDIN_FILENO);
+
+8. safe_close
+
+Ferme un descripteur de fichier et gère les erreurs.
+c
+Copy
+
+void safe_close(int fd)
+{
+    if (close(fd) < 0)
+    {
+        print_error("close", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+Utilisation :
+c
+Copy
+
+safe_close(pipefd[0]);
+
+9. safe_execve
+
+Exécute une commande et gère les erreurs.
+c
+Copy
+
+void safe_execve(const char *path, char *const argv[], char *const envp[])
+{
+    execve(path, argv, envp);
+    print_error("execve", strerror(errno));
+    exit(EXIT_FAILURE);
+}
+
+Utilisation :
+c
+Copy
+
+safe_execve(path, cmd->argv, env_to_array(shell->env));
+
+10. safe_itoa
+
+Convertit un entier en chaîne de caractères et gère les erreurs.
+c
+Copy
+
+char *safe_itoa(int n)
+{
+    char *str;
+
+    str = ft_itoa(n);
+    if (!str)
+    {
+        print_error("itoa", "memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    return (str);
+}
+
+Utilisation :
+c
+Copy
+
+char *exit_status = safe_itoa(shell->last_exit_status);
+
+11. safe_getcwd
+
+Récupère le répertoire courant et gère les erreurs.
+c
+Copy
+
+char *safe_getcwd(char *buf, size_t size)
+{
+    if (!getcwd(buf, size))
+    {
+        print_error("getcwd", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    return (buf);
+}
+
+Utilisation :
+c
+Copy
+
+char cwd[1024];
+safe_getcwd(cwd, sizeof(cwd));
+
+12. safe_chdir
+
+Change de répertoire et gère les erreurs.
+c
+Copy
+
+void safe_chdir(const char *path)
+{
+    if (chdir(path) < 0)
+    {
+        print_error("chdir", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
+Utilisation :
+c
+Copy
+
+safe_chdir("/tmp");
+
+Pourquoi ces fonctions sont utiles ?
+
+    Réduction de la redondance : Plus besoin de répéter les vérifications d'erreur.
+
+    Centralisation des erreurs : Toutes les erreurs sont gérées de manière cohérente.
+
+    Lisibilité : Le code devient plus concis et plus facile à comprendre.
+
+    Maintenance : Si tu dois modifier la gestion des erreurs, tu n'as qu'à le faire dans une seule fonction.
+
+Exemple d'intégration dans ton projet
+
+Supposons que tu veuilles utiliser safe_malloc et safe_strdup dans builtin_export :
+c
+Copy
+
+int builtin_export(char **args, t_shell *shell)
+{
+    char *name;
+    char *value;
+    char *equal_pos;
+
+    if (!args[1])
+        return (print_env(shell->env), 0);
+
+    equal_pos = ft_strchr(args[1], '=');
+    if (!equal_pos)
+        return (print_error("export", "invalid argument"), 1);
+
+    name = safe_strndup(args[1], equal_pos - args[1]);
+    value = safe_strdup(equal_pos + 1);
+
+    set_env_var(&shell->env, name, value);
+    free(name);
+    free(value);
+    return (0);
+}
+
+Si tu veux que je t'aide à implémenter l'une de ces fonctions ou à les intégrer dans ton projet, dis-le-moi ! 😊
+et realloc?
+
+The server is busy. Please try again later.
+et realloc comme fonction safe realloc?
+
+Absolument ! Une fonction safe_realloc est une excellente idée pour gérer les réallocations de mémoire de manière sécurisée et centralisée. Elle permet de réallouer de la mémoire tout en vérifiant les erreurs et en évitant les fuites de mémoire.
+
+Voici comment tu peux implémenter safe_realloc :
+Implémentation de safe_realloc
+c
+Copy
+
+void *safe_realloc(void *ptr, size_t size)
+{
+    void *new_ptr;
+
+    new_ptr = realloc(ptr, size);
+    if (!new_ptr && size > 0) // Vérifie si la réallocation a échoué
+    {
+        print_error("realloc", "memory allocation failed");
+        free(ptr); // Libère l'ancien pointeur pour éviter une fuite de mémoire
+        exit(EXIT_FAILURE);
+    }
+    return (new_ptr);
+}
+
+Explications :
+
+    realloc(ptr, size) : Réalloue la mémoire pointée par ptr à la nouvelle taille size.
+
+    Vérification des erreurs : Si realloc échoue, la fonction affiche une erreur et quitte le programme.
+
+    Libération de l'ancien pointeur : Si realloc échoue, free(ptr) est appelé pour éviter une fuite de mémoire.
+
+    Retour du nouveau pointeur : Si la réallocation réussit, la fonction retourne le nouveau pointeur.
+
+Utilisation de safe_realloc
+Cas 1 : Réallocation d'un tableau dynamique
+
+Supposons que tu veuilles agrandir un tableau dynamique dans add_argument_to_command :
+c
+Copy
+
+void add_argument_to_command(t_command *command, const char *argument)
+{
+    int argc;
+
+    if (!command || !argument)
+        return;
+
+    argc = array_len(command->argv);
+    command->argv = safe_realloc(command->argv, sizeof(char *) * (argc + 2));
+    command->argv[argc] = safe_strdup(argument);
+    command->argv[argc + 1] = NULL;
+}
+
+Cas 2 : Réallocation d'une chaîne de caractères
+
+Supposons que tu veuilles agrandir une chaîne de caractères dans append_char :
+c
+Copy
+
+char *append_char(char *result, char c)
+{
+    char temp[2] = {c, '\0'};
+    char *new_result;
+
+    new_result = safe_strjoin(result, temp);
+    free(result); // Libère l'ancienne chaîne
+    return (new_result);
+}
+
+Pourquoi safe_realloc est utile ?
+
+    Gestion centralisée des erreurs : Plus besoin de vérifier manuellement si realloc a échoué.
+
+    Évite les fuites de mémoire : Si realloc échoue, l'ancien pointeur est libéré.
+
+    Code plus propre : Tu n'as pas à répéter les vérifications d'erreur à chaque réallocation.
+
+Exemple complet avec safe_realloc
+
+Voici un exemple complet d'utilisation de safe_realloc pour agrandir un tableau dynamique :
+c
+Copy
+
+#include <stdlib.h>
+#include <stdio.h>
+
+void print_error(const char *cmd, const char *msg)
+{
+    fprintf(stderr, "minishell: %s: %s\n", cmd, msg);
+    exit(EXIT_FAILURE);
+}
+
+void *safe_realloc(void *ptr, size_t size)
+{
+    void *new_ptr;
+
+    new_ptr = realloc(ptr, size);
+    if (!new_ptr && size > 0)
+    {
+        print_error("realloc", "memory allocation failed");
+        free(ptr);
+        exit(EXIT_FAILURE);
+    }
+    return (new_ptr);
+}
+
+int main(void)
+{
+    int *array = NULL;
+    size_t size = 0;
+
+    // Agrandir le tableau dynamiquement
+    for (size_t i = 0; i < 10; i++)
+    {
+        array = safe_realloc(array, sizeof(int) * (size + 1));
+        array[size++] = i;
+    }
+
+    // Afficher le tableau
+    for (size_t i = 0; i < size; i++)
+        printf("%d ", array[i]);
+    printf("\n");
+
+    // Libérer la mémoire
+    free(array);
+    return (0);
+}
+
+Résultat attendu :
+Copy
+
+0 1 2 3 4 5 6 7 8 9
+
+Intégration dans ton projet
+
+Tu peux utiliser safe_realloc partout où tu as besoin de réallouer de la mémoire, par exemple :
+
+    Dans add_argument_to_command pour agrandir le tableau argv.
+
+    Dans tokenize_input pour agrandir un tableau de tokens.
+
+    Dans replace_env_variables pour agrandir une chaîne de caractères.
+
+Si tu as besoin d'aide pour intégrer safe_realloc dans ton projet, n'hésite pas à me le dire ! 😊
+et comme jai pas droit a la fonction realloc c possible de la creer?
+
+Ah, je vois ! Si tu n'as pas le droit d'utiliser la fonction realloc directement, tu peux la recréer manuellement en utilisant malloc, free, et memcpy. Cela te permettra de gérer la réallocation de mémoire tout en respectant les contraintes de ton projet.
+
+Voici comment tu peux implémenter ta propre version de realloc, que nous appellerons ft_realloc, ainsi qu'une version sécurisée safe_ft_realloc.
+Implémentation de ft_realloc
+Fonctionnement :
+
+    Si ptr est NULL, ft_realloc se comporte comme malloc.
+
+    Si size est 0, ft_realloc se comporte comme free.
+
+    Sinon, ft_realloc alloue un nouveau bloc de mémoire, copie les données de l'ancien bloc vers le nouveau, et libère l'ancien bloc.
+
+Code :
+c
+Copy
+
+#include <stdlib.h>
+#include <string.h> // Pour memcpy
+
+void *ft_realloc(void *ptr, size_t old_size, size_t new_size)
+{
+    void *new_ptr;
+
+    // Si new_size est 0, libère le bloc de mémoire
+    if (new_size == 0)
+    {
+        free(ptr);
+        return (NULL);
+    }
+
+    // Si ptr est NULL, alloue un nouveau bloc
+    if (!ptr)
+        return (malloc(new_size));
+
+    // Alloue un nouveau bloc de mémoire
+    new_ptr = malloc(new_size);
+    if (!new_ptr)
+        return (NULL);
+
+    // Copie les données de l'ancien bloc vers le nouveau
+    size_t copy_size = (old_size < new_size) ? old_size : new_size;
+    memcpy(new_ptr, ptr, copy_size);
+
+    // Libère l'ancien bloc
+    free(ptr);
+
+    return (new_ptr);
+}
+
+Implémentation de safe_ft_realloc
+
+Pour une version sécurisée qui gère les erreurs automatiquement :
+c
+Copy
+
+void *safe_ft_realloc(void *ptr, size_t old_size, size_t new_size)
+{
+    void *new_ptr;
+
+    new_ptr = ft_realloc(ptr, old_size, new_size);
+    if (!new_ptr && new_size > 0)
+    {
+        print_error("ft_realloc", "memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+    return (new_ptr);
+}
+
+Utilisation de ft_realloc et safe_ft_realloc
+
